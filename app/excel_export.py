@@ -7,7 +7,7 @@ database = 'YOUR_DATABASE_NAME'
 schema = 'YOUR_SCHEMA_NAME'
 excel_output = 'views_top5_export.xlsx'
 
-# Use trusted connection and certificate, ODBC 18
+# Connect with ODBC Driver 18 using trusted settings
 conn_str = (
     f"DRIVER={{ODBC Driver 18 for SQL Server}};"
     f"SERVER={server};"
@@ -16,7 +16,6 @@ conn_str = (
     f"TrustServerCertificate=yes;"
 )
 
-# Connect with decoding workaround
 conn = pyodbc.connect(conn_str)
 conn.setencoding(encoding='utf-8')
 conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
@@ -35,24 +34,31 @@ views = views_df['TABLE_NAME'].tolist()
 with pd.ExcelWriter(excel_output, engine='openpyxl', datetime_format='yyyy-mm-dd hh:mm:ss') as writer:
     for view in views:
         try:
-            # Fetch column metadata
+            # Get datetimeoffset columns from metadata
+            col_type_query = f"""
+            SELECT c.name
+            FROM sys.columns c
+            JOIN sys.views v ON c.object_id = v.object_id
+            JOIN sys.types t ON c.user_type_id = t.user_type_id
+            WHERE v.name = '{view}' AND SCHEMA_NAME(v.schema_id) = '{schema}' AND t.name = 'datetimeoffset'
+            """
+            dt_offset_cols = pd.read_sql(col_type_query, conn)['name'].tolist()
+
+            # Get all columns
+            col_query = f"SELECT TOP 0 * FROM [{schema}].[{view}]"
             cursor = conn.cursor()
-            cursor.execute(f"SELECT TOP 0 * FROM [{schema}].[{view}]")
-            columns = [column[0] for column in cursor.description]
-            types = [column[1] for column in cursor.description]
+            cursor.execute(col_query)
+            columns = [col[0] for col in cursor.description]
 
-            # Build SELECT query with CAST for datetimeoffset
-            select_clauses = []
-            for col, sqltype in zip(columns, types):
-                if sqltype == -155:  # datetimeoffset
-                    select_clauses.append(f"CAST([{col}] AS datetime) AS [{col}]")
-                else:
-                    select_clauses.append(f"[{col}]")
-
+            # Build query with cast where needed
+            select_clauses = [
+                f"CAST([{col}] AS datetime) AS [{col}]" if col in dt_offset_cols else f"[{col}]"
+                for col in columns
+            ]
             select_clause = ", ".join(select_clauses)
             query = f"SELECT TOP 5 {select_clause} FROM [{schema}].[{view}]"
 
-            # Execute and write to Excel
+            # Execute and export
             df = pd.read_sql(query, conn)
             df.to_excel(writer, sheet_name=view[:31], index=False)
             print(f"✅ Exported top 5 from {schema}.{view}")

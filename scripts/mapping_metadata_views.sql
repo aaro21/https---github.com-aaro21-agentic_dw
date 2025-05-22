@@ -41,3 +41,18 @@ SELECT
     Timestamp
 FROM AgentQueryLog;
 GO
+
+CREATE VIEW vw_SourceSystems AS
+SELECT
+    Id, Name, Type, IsActive, Notes
+FROM SourceSystems;
+GO
+
+Example
+INSERT INTO SourceSystems (Name, Type, ConnectionString, Notes)
+VALUES (
+    'CRM_Oracle_Prod',
+    'oracle',
+    'oracle+cx_oracle://user:pass@host:1521/?service_name=svc',
+    'Production CRM Oracle server'
+);

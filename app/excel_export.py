@@ -1,5 +1,6 @@
 import pyodbc
 import pandas as pd
+from openpyxl.utils import get_column_letter
 
 # Configuration
 server = 'YOUR_SERVER_NAME'
@@ -34,7 +35,7 @@ views = views_df['TABLE_NAME'].tolist()
 with pd.ExcelWriter(excel_output, engine='openpyxl', datetime_format='yyyy-mm-dd hh:mm:ss') as writer:
     for view in views:
         try:
-            # Get datetimeoffset columns from metadata
+            # Get datetimeoffset columns
             col_type_query = f"""
             SELECT c.name
             FROM sys.columns c
@@ -58,10 +59,30 @@ with pd.ExcelWriter(excel_output, engine='openpyxl', datetime_format='yyyy-mm-dd
             select_clause = ", ".join(select_clauses)
             query = f"SELECT TOP 5 {select_clause} FROM [{schema}].[{view}]"
 
-            # Execute and export
+            # Execute and load DataFrame
             df = pd.read_sql(query, conn)
-            df.to_excel(writer, sheet_name=view[:31], index=False)
+
+            # Fix large integers (bigints) for Excel display
+            for col in df.columns:
+                if pd.api.types.is_integer_dtype(df[col]) and df[col].max() > 1e11:
+                    df[col] = df[col].astype(str)
+
+            # Export to Excel sheet
+            sheet_name = view[:31]  # Excel limit
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            # Auto-fit columns
+            worksheet = writer.sheets[sheet_name]
+            for i, col in enumerate(df.columns, 1):  # 1-based index for openpyxl
+                max_len = max(
+                    df[col].astype(str).map(len).max(),
+                    len(col)
+                )
+                adjusted_width = max_len + 2
+                worksheet.column_dimensions[get_column_letter(i)].width = adjusted_width
+
             print(f"✅ Exported top 5 from {schema}.{view}")
+
         except Exception as e:
             print(f"⚠️ Skipping {schema}.{view} due to error: {e}")
 
